@@ -1,6 +1,7 @@
 [workspace]
 members = [
     "shuckie-server",
-    "shuckie-test-impl"
+    "shuckie-test-impl",
+    "shuckie-server-c"
 ]
 resolver = "2"

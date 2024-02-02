@@ -7,6 +7,13 @@ name = "shuckie-server"
 version = "0.1.0"
 
 [[package]]
+name = "shuckie-server-c"
+version = "0.1.0"
+dependencies = [
+ "shuckie-server",
+]
+
+[[package]]
 name = "shuckie-test-impl"
 version = "0.1.0"
 dependencies = [

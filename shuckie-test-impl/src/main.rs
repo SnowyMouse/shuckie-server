@@ -5,7 +5,7 @@ use shuckie_server::server::*;
 
 pub const GAMEBOY_APPROX_NS_PER_FRAME: u64 = 1000000000 * ((1024 * 1024 * 2) / 125257647);
 
-fn address_resolver(range: AddressRange) -> bool {
+fn address_resolver(range: &AddressRange) -> bool {
     let end = match range.address.checked_add(range.size) {
         Some(n) => n,
         None => {
@@ -26,7 +26,7 @@ fn main() {
     }
 
     let mut server = Server::new(&args[1], &args[2]).unwrap();
-    server.set_address_validation_callback(Some(address_resolver));
+    server.set_address_validation_callback(Some(AddressValidationCallback::Rust(address_resolver)));
     server.start_thread().unwrap();
     handle_server(&mut server);
 }
@@ -50,8 +50,8 @@ fn handle_server(server: &mut Server) {
                     buffer[w.address as usize .. w.address as usize + bytes.len()].copy_from_slice(bytes.as_slice());
                 },
                 QueuedRequest::Read(s) => {
-                    let range = s.get_range();
-                    let range = range.address as usize .. (range.address + range.size) as usize;
+                    let address = s.get_address() as usize;
+                    let range = address .. (address + s.get_buffer().len());
                     let input = &buffer[range.clone()];
                     let output = &mut s.get_buffer();
                     output.clone_from_slice(input);

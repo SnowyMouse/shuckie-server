@@ -13,6 +13,7 @@ use command::*;
 ///
 /// Can be overridden with [`Server::set_max_peers`]
 pub const DEFAULT_MAX_PEERS: usize = 5;
+pub type UserData = *mut ();
 
 #[derive(Clone)]
 pub struct Server {
@@ -41,6 +42,7 @@ const UDP_FOURCC: u32 = 0x4455587E;
 const UDP_PROTOCOL_VERSION: u32 = 1;
 
 #[derive(Copy, Clone, Default, PartialEq)]
+#[repr(C)]
 pub struct AddressRange {
     pub address: u64,
     pub size: u64
@@ -57,13 +59,26 @@ pub enum QueuedRequest<'a> {
     Write(&'a QueuedWrite)
 }
 
-pub type AddressValidationCallback = fn(AddressRange) -> bool;
-fn address_validation_callback_no_op(_: AddressRange) -> bool {
+#[derive(Copy, Clone)]
+pub enum AddressValidationCallback {
+    Rust(fn(&AddressRange) -> bool),
+    Extern(extern "C" fn(u64, u64) -> bool)
+}
+impl AddressValidationCallback {
+    pub fn call(&self, range: &AddressRange) -> bool {
+        match self {
+            Self::Rust(n) => n(range),
+            Self::Extern(n) => n(range.address, range.size)
+        }
+    }
+}
+
+fn address_validation_callback_no_op(_: &AddressRange) -> bool {
     false
 }
 
 pub struct Stream {
-    range: AddressRange,
+    address: u64,
     pending: bool,
     buffer: Vec<u8>,
     sequence_index: AtomicU64
@@ -72,16 +87,16 @@ pub struct Stream {
 impl Stream {
     fn new(address: u64, size: u64) -> Self {
         Stream {
-            range: AddressRange { address, size },
+            address,
             pending: false,
             buffer: vec![0; size.try_into().unwrap()],
             sequence_index: AtomicU64::new(0)
         }
     }
 
-    /// Get the range to read from.
-    pub fn get_range(&self) -> &AddressRange {
-        &self.range
+    /// Get the address to read from.
+    pub fn get_address(&self) -> u64 {
+        self.address
     }
 
     /// Get the buffer to write data to.
@@ -121,7 +136,7 @@ impl Stream {
         }
 
         let sequence_index = self.sequence_index.fetch_add(1, Ordering::Relaxed);
-        let mut address = self.range.address;
+        let mut address = self.address;
         for i in (0..self.buffer.len()).step_by(PACKET_SIZE) {
             let range = &self.buffer[i..(i + PACKET_SIZE).min(self.buffer.len())];
             if !send_packet(address, range, sequence_index, socket, to) {
@@ -162,7 +177,7 @@ impl Server {
                 max_peers: DEFAULT_MAX_PEERS,
                 peers: Vec::new(),
                 server_thread: None,
-                address_validation_callback: address_validation_callback_no_op,
+                address_validation_callback: AddressValidationCallback::Rust(address_validation_callback_no_op),
                 stopping: false
             })))
         })
@@ -214,7 +229,9 @@ impl Server {
     ///
     /// By default all addresses are allowed, but you can limit this to a specific range.
     pub fn set_address_validation_callback(&mut self, address_validation_callback: Option<AddressValidationCallback>) {
-        self.server.lock().unwrap().address_validation_callback = address_validation_callback.unwrap_or(address_validation_callback_no_op);
+        self.server.lock().unwrap().address_validation_callback = address_validation_callback.unwrap_or(
+            AddressValidationCallback::Rust(address_validation_callback_no_op)
+        );
     }
 
     /// Get all pending streams and handle them
@@ -254,7 +271,7 @@ impl ServerImpl {
                     subscribe_addr: None,
                     streams: Vec::with_capacity(256),
                     queued_writes: Vec::with_capacity(256),
-                    address_validation_callback: address_validation_callback_no_op
+                    address_validation_callback: AddressValidationCallback::Rust(address_validation_callback_no_op)
                 }
             )))
         })

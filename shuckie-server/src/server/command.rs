@@ -85,7 +85,7 @@ fn unsubscribe(_args: &[&str], peer: &mut PeerImpl) -> IOResult<()> {
 }
 
 fn validate_address_range(peer: &mut PeerImpl, address: u64, size: u64) -> IOResult<bool> {
-    if !(peer.address_validation_callback)(AddressRange { address, size }) {
+    if !peer.address_validation_callback.call(&AddressRange { address, size }) {
         writeln!(peer.stream, "ERR Address range given is not valid for this emulator")?;
         Ok(false)
     }
@@ -160,8 +160,8 @@ fn stream_memory(args: &[&str], peer: &mut PeerImpl) -> IOResult<()> {
     };
 
     if peer.streams.iter().any(|p| {
-        let start = p.range.address;
-        let end = start + p.range.size;
+        let start = p.address;
+        let end = start + p.buffer.len() as u64;
         address_end > start && address < end
     }) {
         return writeln!(peer.stream, "ERR Already streaming somewhere at 0x{:X}-0x{:X}", address, address_end);
@@ -181,14 +181,15 @@ fn list_streams(_args: &[&str], peer: &mut PeerImpl) -> IOResult<()> {
         return writeln!(peer.stream, "ERR No streams");
     }
 
-    let write_addr = |stream: &mut TcpStream, queued_write: AddressRange| write!(stream, "0x{:X}[{}]", queued_write.address, queued_write.size);
+    let write_addr = |stream: &mut TcpStream, address: u64, size: usize| write!(stream, "0x{address:X}[{size}]");
     let mut iter = peer.streams.iter();
     write!(peer.stream, "OK ")?;
-    write_addr(&mut peer.stream, iter.next().unwrap().range)?;
 
+    let first = iter.next().unwrap();
+    write_addr(&mut peer.stream, first.address, first.buffer.len())?;
     for i in iter {
         write!(peer.stream, ", ")?;
-        write_addr(&mut peer.stream, i.range)?;
+        write_addr(&mut peer.stream, i.address, i.buffer.len())?;
     }
     writeln!(peer.stream)
 }
@@ -209,7 +210,7 @@ fn stop_streaming(args: &[&str], peer: &mut PeerImpl) -> IOResult<()> {
     };
 
     let size = peer.streams.len();
-    peer.streams.retain(|f| f.range.address != address);
+    peer.streams.retain(|f| f.address != address);
     let deleted = size - peer.streams.len();
 
     if deleted == 0 {
