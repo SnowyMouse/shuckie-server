@@ -6,6 +6,10 @@ use shuckie_server::server::*;
 pub const GAMEBOY_APPROX_NS_PER_FRAME: u64 = 1000000000 * ((1024 * 1024 * 2) / 125257647);
 
 fn address_resolver(range: &AddressRange) -> bool {
+    if range.size == 0 {
+        println!("Requesting a range of zero bytes!");
+        return false;
+    }
     let end = match range.address.checked_add(range.size) {
         Some(n) => n,
         None => {
@@ -14,7 +18,7 @@ fn address_resolver(range: &AddressRange) -> bool {
         }
     };
     let accepted = end < 0x16000;
-    println!("Range request for [0x{:08X}..0x{:08X}]: {accepted}", range.address, end);
+    println!("Range request for [0x{:08X}..0x{:08X}] @ domain 0x{:08X}: {accepted}", range.address, end, range.domain);
     accepted
 }
 
@@ -46,7 +50,7 @@ fn handle_server(server: &mut Server) {
             match r {
                 QueuedRequest::Write(w) => {
                     let bytes = w.bytes.lock().unwrap();
-                    println!("Received write request: 0x{:08X} of size 0x{:08X}", w.address, bytes.len());
+                    println!("Received write request: 0x{:08X}:0x{:08X} of size 0x{:08X}", w.domain, w.address, bytes.len());
                     buffer[w.address as usize .. w.address as usize + bytes.len()].copy_from_slice(bytes.as_slice());
                 },
                 QueuedRequest::Read(s) => {

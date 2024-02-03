@@ -98,7 +98,7 @@ pub extern "C" fn shuckie_server_stop_thread(
 #[no_mangle]
 pub extern "C" fn shuckie_server_set_address_validation_callback(
     server: &mut Server,
-    address_validation_callback: Option<extern "C" fn(u64, u64) -> bool>
+    address_validation_callback: Option<extern "C" fn(u64, u64, u64) -> bool>
 ) {
     let callback = match address_validation_callback {
         Some(n) => n,
@@ -134,9 +134,10 @@ pub extern "C" fn shuckie_server_queued_request_type(request: &QueuedRequest) ->
 }
 
 #[no_mangle]
-pub extern "C" fn shuckie_server_get_read_data(request: &mut QueuedRequest, address: &mut u64, buffer: &mut *mut u8, buffer_length: &mut u64) {
+pub extern "C" fn shuckie_server_get_read_data(request: &mut QueuedRequest, domain: &mut u64, address: &mut u64, buffer: &mut *mut u8, buffer_length: &mut u64) {
     match request {
         QueuedRequest::Read(r) => {
+            *domain = r.get_domain();
             *address = r.get_address();
             *buffer = r.get_buffer().as_mut_ptr();
             *buffer_length = r.get_buffer().len() as u64;
@@ -154,9 +155,10 @@ pub extern "C" fn shuckie_server_send_buffer(request: &mut QueuedRequest) {
 }
 
 #[no_mangle]
-pub extern "C" fn shuckie_server_get_write_data(request: &mut QueuedRequest, address: &mut u64, buffer: &mut *const u8, buffer_length: &mut u64) {
+pub extern "C" fn shuckie_server_get_write_data(request: &mut QueuedRequest, domain: &mut u64, address: &mut u64, buffer: &mut *const u8, buffer_length: &mut u64) {
     match request {
         QueuedRequest::Write(w) => {
+            *domain = w.domain;
             *address = w.address;
 
             let data = w.bytes.lock().unwrap();

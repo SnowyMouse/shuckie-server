@@ -19,10 +19,10 @@ pub const COMMANDS: &'static [Command] = &[
     Command { name: "LIST_COMMANDS", function: list_commands, arguments: (0, 0), description: "List all commands.", usage: "" },
     Command { name: "LIST_STREAMS", function: list_streams, arguments: (0, 0), description: "List all currently streamed addresses and lengths. Fails if not streaming.", usage: "" },
     Command { name: "STOP_STREAMING", function: stop_streaming, arguments: (0, 1), description: "Stop streaming at the requested address, or no argument to stop all streaming. Fails if not streaming that address.", usage: "[address]" },
-    Command { name: "STREAM_MEMORY", function: stream_memory, arguments: (2, 2), description: "Stream memory from the given address to the subscribed address via UDP. Fails if already streaming that address.", usage: "<address> <length>" },
+    Command { name: "STREAM_MEMORY", function: stream_memory, arguments: (3, 3), description: "Stream memory from the given address to the subscribed address via UDP. Fails if already streaming that address.", usage: "<address> <length>" },
     Command { name: "SUBSCRIBE", function: subscribe, arguments: (1, 1), description: "Subscribe with the given UDP port (IP must match your TCP IP). Fails if already subscribed.", usage: "<port>" },
     Command { name: "UNSUBSCRIBE", function: unsubscribe, arguments: (0, 0), description: "Unsubscribe without clearing the list of streamed addresses. Must be done before re-subscribing. Fails if not subscribed.", usage: "" },
-    Command { name: "WRITE_MEMORY", function: write_memory, arguments: (2, usize::MAX), description: "Writes the memory to the given address, but note that the actual write may be slightly delayed if the emulator thread is busy.", usage: "<address> <byte1> [byte2 ...]" }
+    Command { name: "WRITE_MEMORY", function: write_memory, arguments: (3, usize::MAX), description: "Writes the memory to the given address, but note that the actual write may be slightly delayed if the emulator thread is busy.", usage: "<domain> <address> <byte1> [byte2 ...]" }
 ];
 
 fn help(args: &[&str], peer: &mut PeerImpl) -> IOResult<()> {
@@ -84,8 +84,8 @@ fn unsubscribe(_args: &[&str], peer: &mut PeerImpl) -> IOResult<()> {
     }
 }
 
-fn validate_address_range(peer: &mut PeerImpl, address: u64, size: u64) -> IOResult<bool> {
-    if !peer.address_validation_callback.call(&AddressRange { address, size }) {
+fn validate_address_range(peer: &mut PeerImpl, domain: u64, address: u64, size: u64) -> IOResult<bool> {
+    if !peer.address_validation_callback.call(&AddressRange { domain, address, size }) {
         writeln!(peer.stream, "ERR Address range given is not valid for this emulator")?;
         Ok(false)
     }
@@ -95,14 +95,19 @@ fn validate_address_range(peer: &mut PeerImpl, address: u64, size: u64) -> IORes
 }
 
 fn write_memory(args: &[&str], peer: &mut PeerImpl) -> IOResult<()> {
-    let address = match parse_str_to_u64(args[0]) {
+    let domain = match parse_str_to_u64(args[0]) {
+        Some(n) => n,
+        None => return writeln!(peer.stream, "ERR Invalid domain")
+    };
+
+    let address = match parse_str_to_u64(args[1]) {
         Some(n) => n,
         None => return writeln!(peer.stream, "ERR Invalid address")
     };
 
-    let bytes = args.len() - 1;
+    let bytes = args.len() - 2;
     let mut data: Vec<u8> = Vec::with_capacity(bytes);
-    if !validate_address_range(peer, address, bytes as u64)? {
+    if !validate_address_range(peer, domain, address, bytes as u64)? {
         return Ok(())
     }
 
@@ -116,7 +121,7 @@ fn write_memory(args: &[&str], peer: &mut PeerImpl) -> IOResult<()> {
     }
 
     writeln!(peer.stream, "OK Writing {} byte{} to 0x{:X}", data.len(), if data.len() == 1 { "" } else { "s" }, address)?;
-    peer.queued_writes.push(QueuedWrite { address, bytes: Arc::new(Mutex::new(data)) });
+    peer.queued_writes.push(QueuedWrite { domain, address, bytes: Arc::new(Mutex::new(data)) });
     Ok(())
 }
 
@@ -145,13 +150,15 @@ fn parse_str_to_u64(what: &str) -> Option<u64> {
 }
 
 fn stream_memory(args: &[&str], peer: &mut PeerImpl) -> IOResult<()> {
-    let address = parse_str_to_u64(args[0]);
-    let size = parse_str_to_u64(args[1]);
+    let domain = parse_str_to_u64(args[0]);
+    let address = parse_str_to_u64(args[1]);
+    let size = parse_str_to_u64(args[2]);
 
-    if address == None || size == None || size == Some(0) {
+    if domain == None || address == None || size == None || size == Some(0) {
         return writeln!(peer.stream, "ERR Invalid address and/or size");
     }
 
+    let domain = domain.unwrap();
     let address = address.unwrap();
     let size = size.unwrap();
     let address_end = match address.checked_add(size) {
@@ -159,20 +166,22 @@ fn stream_memory(args: &[&str], peer: &mut PeerImpl) -> IOResult<()> {
         None => return writeln!(peer.stream, "ERR Size would make address overflow")
     };
 
-    if peer.streams.iter().any(|p| {
+    if peer.streams
+        .iter()
+        .filter(|p| p.domain == domain)
+        .any(|p| {
         let start = p.address;
         let end = start + p.buffer.len() as u64;
         address_end > start && address < end
     }) {
-        return writeln!(peer.stream, "ERR Already streaming somewhere at 0x{:X}-0x{:X}", address, address_end);
+        return writeln!(peer.stream, "ERR Already streaming somewhere at 0x{:X}-0x{:X} in domain 0x{:X}", address, address_end, domain);
     }
 
-    let data: Vec<u8> = Vec::with_capacity(args.len() - 1);
-    if !validate_address_range(peer, address, data.len() as u64)? {
+    if !validate_address_range(peer, domain, address, size)? {
         return Ok(())
     }
 
-    peer.streams.push(Stream::new(address, size));
+    peer.streams.push(Stream::new(domain, address, size));
     writeln!(peer.stream, "OK Now streaming at 0x{:X}", address)
 }
 
@@ -181,15 +190,15 @@ fn list_streams(_args: &[&str], peer: &mut PeerImpl) -> IOResult<()> {
         return writeln!(peer.stream, "ERR No streams");
     }
 
-    let write_addr = |stream: &mut TcpStream, address: u64, size: usize| write!(stream, "0x{address:X}[{size}]");
+    let write_addr = |stream: &mut TcpStream, domain: u64, address: u64, size: usize| write!(stream, "0x{domain:08X}:0x{address:08X}[{size}]");
     let mut iter = peer.streams.iter();
     write!(peer.stream, "OK ")?;
 
     let first = iter.next().unwrap();
-    write_addr(&mut peer.stream, first.address, first.buffer.len())?;
+    write_addr(&mut peer.stream, first.domain, first.address, first.buffer.len())?;
     for i in iter {
         write!(peer.stream, ", ")?;
-        write_addr(&mut peer.stream, i.address, i.buffer.len())?;
+        write_addr(&mut peer.stream, i.domain, i.address, i.buffer.len())?;
     }
     writeln!(peer.stream)
 }

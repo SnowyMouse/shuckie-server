@@ -44,12 +44,14 @@ const UDP_PROTOCOL_VERSION: u32 = 1;
 #[derive(Copy, Clone, Default, PartialEq)]
 #[repr(C)]
 pub struct AddressRange {
+    pub domain: u64,
     pub address: u64,
     pub size: u64
 }
 
 #[derive(Clone)]
 pub struct QueuedWrite {
+    pub domain: u64,
     pub address: u64,
     pub bytes: Arc<Mutex<Vec<u8>>>
 }
@@ -62,13 +64,13 @@ pub enum QueuedRequest<'a> {
 #[derive(Copy, Clone)]
 pub enum AddressValidationCallback {
     Rust(fn(&AddressRange) -> bool),
-    Extern(extern "C" fn(u64, u64) -> bool)
+    Extern(extern "C" fn(u64, u64, u64) -> bool)
 }
 impl AddressValidationCallback {
     pub fn call(&self, range: &AddressRange) -> bool {
         match self {
             Self::Rust(n) => n(range),
-            Self::Extern(n) => n(range.address, range.size)
+            Self::Extern(n) => n(range.domain, range.address, range.size)
         }
     }
 }
@@ -78,6 +80,7 @@ fn address_validation_callback_no_op(_: &AddressRange) -> bool {
 }
 
 pub struct Stream {
+    domain: u64,
     address: u64,
     pending: bool,
     buffer: Vec<u8>,
@@ -85,13 +88,19 @@ pub struct Stream {
 }
 
 impl Stream {
-    fn new(address: u64, size: u64) -> Self {
+    fn new(domain: u64, address: u64, size: u64) -> Self {
         Stream {
+            domain,
             address,
             pending: false,
             buffer: vec![0; size.try_into().unwrap()],
             sequence_index: AtomicU64::new(0)
         }
+    }
+
+    /// Get the domain to read from.
+    pub fn get_domain(&self) -> u64 {
+        self.domain
     }
 
     /// Get the address to read from.
@@ -110,13 +119,14 @@ impl Stream {
     }
 
     fn respond(&mut self, socket: &UdpSocket, to: &SocketAddr) {
-        fn send_packet(address: u64, data: &[u8], sequence_index: u64, socket: &UdpSocket, to: &SocketAddr) -> bool {
+        fn send_packet(domain: u64, address: u64, data: &[u8], sequence_index: u64, socket: &UdpSocket, to: &SocketAddr) -> bool {
             let packet = [0u8; PACKET_SIZE + 100];
             let mut cursor = Cursor::new(packet);
 
             cursor.write(&UDP_FOURCC.to_be_bytes()).unwrap();
             cursor.write(&UDP_PROTOCOL_VERSION.to_be_bytes()).unwrap();
             cursor.write(&sequence_index.to_be_bytes()).unwrap();
+            cursor.write(&domain.to_be_bytes()).unwrap();
             cursor.write(&address.to_be_bytes()).unwrap();
             cursor.write(&(data.len() as u64).to_be_bytes()).unwrap();
             cursor.write(data).unwrap();
@@ -136,10 +146,11 @@ impl Stream {
         }
 
         let sequence_index = self.sequence_index.fetch_add(1, Ordering::Relaxed);
+        let domain = self.domain;
         let mut address = self.address;
         for i in (0..self.buffer.len()).step_by(PACKET_SIZE) {
             let range = &self.buffer[i..(i + PACKET_SIZE).min(self.buffer.len())];
-            if !send_packet(address, range, sequence_index, socket, to) {
+            if !send_packet(domain, address, range, sequence_index, socket, to) {
                 return
             }
             address += range.len() as u64;
@@ -328,8 +339,14 @@ impl PeerImpl {
                 let cmd = &COMMANDS[n];
                 if cmd.arguments.0 > args.len() || cmd.arguments.1 < args.len() {
                     dprintln!("Received command from {}: {command_full}, but incorrect number of args given; {} outside of [{},{}]", self.addr, args.len(), cmd.arguments.0, cmd.arguments.1);
+
+                    let s = if cmd.arguments.1 == 1 { "" } else { "s" };
+
                     if cmd.arguments.0 == cmd.arguments.1 {
-                        wrap!(writeln!(self.stream, "ERR `{command}` takes {} argument{}; use `HELP {command}` for usage", cmd.arguments.0, if cmd.arguments.1 == 1 { "" } else { "s" }))?;
+                        wrap!(writeln!(self.stream, "ERR `{command}` takes exactly {} argument{s}; use `HELP {command}` for usage", cmd.arguments.0))?;
+                    }
+                    else if cmd.arguments.1 == usize::MAX {
+                        wrap!(writeln!(self.stream, "ERR `{command}` takes at least {} argument{s}; use `HELP {command}` for usage", cmd.arguments.0))?;
                     }
                     else {
                         wrap!(writeln!(self.stream, "ERR `{command}` takes {}-{} arguments; use `HELP {command}` for usage", cmd.arguments.0, cmd.arguments.1))?;
