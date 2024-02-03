@@ -3,7 +3,7 @@ extern crate shuckie_server;
 use std::time::Duration;
 use shuckie_server::server::*;
 
-pub const GAMEBOY_APPROX_NS_PER_FRAME: u64 = 1000000000 * ((1024 * 1024 * 2) / 125257647);
+pub const GAMEBOY_APPROX_NS_PER_FRAME: Duration = Duration::from_nanos(1000000000 * (1024 * 1024 * 2) / 125257647);
 
 fn address_resolver(range: &AddressRange) -> bool {
     if range.size == 0 {
@@ -39,12 +39,16 @@ fn handle_server(server: &mut Server) {
     let mut buffer = vec![0u8; 0x10000];
 
     let mut next_frame = std::time::Instant::now();
+    let mut total = 0u64;
+
     loop {
         let now = std::time::Instant::now();
         if now < next_frame {
             continue
         }
-        next_frame = now + Duration::from_nanos(GAMEBOY_APPROX_NS_PER_FRAME);
+
+        total += 1;
+        next_frame = now + GAMEBOY_APPROX_NS_PER_FRAME;
 
         server.poll_streams(|r| {
             match r {
@@ -54,6 +58,7 @@ fn handle_server(server: &mut Server) {
                     buffer[w.address as usize .. w.address as usize + bytes.len()].copy_from_slice(bytes.as_slice());
                 },
                 QueuedRequest::Read(s) => {
+                    println!("Handling a read request!");
                     let address = s.get_address() as usize;
                     let range = address .. (address + s.get_buffer().len());
                     let input = &buffer[range.clone()];
@@ -62,6 +67,6 @@ fn handle_server(server: &mut Server) {
                     s.send_buffer();
                 }
             }
-        })
+        });
     }
 }
