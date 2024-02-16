@@ -5,6 +5,7 @@ use std::io::{Cursor, Read, Write};
 use std::sync::{Arc, Mutex};
 use std::pin::Pin;
 use std::sync::atomic::{AtomicU64, Ordering};
+use std::time::Duration;
 
 mod command;
 use command::*;
@@ -451,5 +452,8 @@ fn server_thread(what: Arc<Mutex<Pin<Box<ServerImpl>>>>) {
             };
             server.accept_client(stream, addr);
         }
+
+        drop(server);
+        std::thread::sleep(Duration::from_millis(1));
     }
 }

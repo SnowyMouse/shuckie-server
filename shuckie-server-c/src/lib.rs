@@ -65,6 +65,7 @@ pub unsafe extern "C" fn shuckie_server_free(
     server: *mut Server
 ) {
     if !server.is_null() {
+        let _ = (*server).stop_thread();
         drop(Box::from_raw(server))
     }
 }

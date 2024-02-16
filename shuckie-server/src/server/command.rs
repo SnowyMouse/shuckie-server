@@ -111,7 +111,7 @@ fn write_memory(args: &[&str], peer: &mut PeerImpl) -> IOResult<()> {
         return Ok(())
     }
 
-    let input = args[1..].iter().map(|f| parse_str_to_u64(*f));
+    let input = args[2..].iter().map(|f| parse_str_to_u64(*f));
     for i in input {
         let byte = match i {
             Some(n) if n <= u8::MAX as u64 => n as u8,

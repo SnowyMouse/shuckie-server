@@ -39,7 +39,6 @@ fn handle_server(server: &mut Server) {
     let mut buffer = vec![0u8; 0x10000];
 
     let mut next_frame = std::time::Instant::now();
-    let mut total = 0u64;
 
     loop {
         let now = std::time::Instant::now();
@@ -47,7 +46,6 @@ fn handle_server(server: &mut Server) {
             continue
         }
 
-        total += 1;
         next_frame = now + GAMEBOY_APPROX_NS_PER_FRAME;
 
         server.poll_streams(|r| {
