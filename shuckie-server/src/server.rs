@@ -33,11 +33,6 @@ struct ServerImpl {
     peers: Vec<Peer>
 }
 
-#[derive(Clone)]
-pub struct Peer {
-    peer: Arc<Mutex<Pin<Box<PeerImpl>>>>
-}
-
 const PACKET_SIZE: usize = 1024;
 const UDP_FOURCC: u32 = 0x4455587E;
 const UDP_PROTOCOL_VERSION: u32 = 1;
@@ -162,7 +157,7 @@ impl Stream {
     }
 }
 
-struct PeerImpl {
+struct Peer {
     stream: TcpStream,
     buffer: Vec<u8>,
     addr: SocketAddr,
@@ -250,9 +245,8 @@ impl Server {
 
     /// Get all pending streams and handle them
     pub fn poll_streams<T>(&mut self, mut callback: T) where T: FnMut(QueuedRequest) {
-        let server = self.server.lock().unwrap();
-        for i in &server.peers {
-            let mut peer = i.peer.lock().unwrap();
+        let mut server = self.server.lock().unwrap();
+        for peer in &mut server.peers {
             for w in &peer.queued_writes {
                 callback(QueuedRequest::Write(w));
             }
@@ -278,21 +272,18 @@ impl ServerImpl {
 
         dprintln!("Accepting client {addr}");
         self.peers.push(Peer {
-                peer: Arc::new(Mutex::new(Box::pin(PeerImpl {
-                    stream,
-                    addr,
-                    buffer: Vec::with_capacity(DEFAULT_BUFFER_CAPACITY),
-                    subscribe_addr: None,
-                    streams: Vec::with_capacity(256),
-                    queued_writes: Vec::with_capacity(256),
-                    address_validation_callback: AddressValidationCallback::Rust(address_validation_callback_no_op)
-                }
-            )))
+            stream,
+            addr,
+            buffer: Vec::with_capacity(DEFAULT_BUFFER_CAPACITY),
+            subscribe_addr: None,
+            streams: Vec::with_capacity(256),
+            queued_writes: Vec::with_capacity(256),
+            address_validation_callback: AddressValidationCallback::Rust(address_validation_callback_no_op)
         })
     }
 }
 
-impl PeerImpl {
+impl Peer {
     /// Return true if the peer should be disconnected
     fn handle_command(&mut self) -> std::result::Result<(), &'static str> {
         macro_rules! wrap {
@@ -393,8 +384,7 @@ fn server_thread(what: Arc<Mutex<Pin<Box<ServerImpl>>>>) {
 
         // Handle input from peers
         for c in 0..server.peers.len() {
-            let client = &mut server.peers[c];
-            let mut peer = client.peer.lock().unwrap();
+            let peer = &mut server.peers[c];
 
             let mut schedule_for_removal = |reason: &'static str| {
                 removal.push((c, reason));
@@ -442,7 +432,7 @@ fn server_thread(what: Arc<Mutex<Pin<Box<ServerImpl>>>>) {
 
         // Drop peers that don't exist anymore
         for (index, _reason) in removal.iter().rev() {
-            let _addr = server.peers.remove(*index).peer.lock().unwrap().addr;
+            let _addr = server.peers.remove(*index).addr;
             dprintln!("Removing peer {_addr}: {_reason}");
         }
 

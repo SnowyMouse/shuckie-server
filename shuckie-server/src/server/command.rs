@@ -3,7 +3,7 @@ use super::*;
 use std::io::Result as IOResult;
 type StrResult<T> = std::result::Result<T, &'static str>;
 
-type CommandFn = fn (args: &[&str], peer: &mut PeerImpl) -> IOResult<()>;
+type CommandFn = fn (args: &[&str], peer: &mut Peer) -> IOResult<()>;
 
 pub struct Command {
     pub name: &'static str,
@@ -25,7 +25,7 @@ pub const COMMANDS: &'static [Command] = &[
     Command { name: "WRITE_MEMORY", function: write_memory, arguments: (3, usize::MAX), description: "Writes the memory to the given address, but note that the actual write may be slightly delayed if the emulator thread is busy.", usage: "<domain> <address> <byte1> [byte2 ...]" }
 ];
 
-fn help(args: &[&str], peer: &mut PeerImpl) -> IOResult<()> {
+fn help(args: &[&str], peer: &mut Peer) -> IOResult<()> {
     let command = match COMMANDS.binary_search_by(|probe| probe.name.cmp(args[0])) {
         Ok(n) => &COMMANDS[n],
         Err(_) => return writeln!(peer.stream, "ERR No such command `{}`", args[0])
@@ -39,7 +39,7 @@ fn help(args: &[&str], peer: &mut PeerImpl) -> IOResult<()> {
     )
 }
 
-fn list_commands(_args: &[&str], peer: &mut PeerImpl) -> IOResult<()> {
+fn list_commands(_args: &[&str], peer: &mut Peer) -> IOResult<()> {
     let mut iter = COMMANDS.iter();
     write!(peer.stream, "OK {}", iter.next().unwrap().name)?;
     for i in iter {
@@ -48,7 +48,7 @@ fn list_commands(_args: &[&str], peer: &mut PeerImpl) -> IOResult<()> {
     writeln!(peer.stream)
 }
 
-fn echo(args: &[&str], peer: &mut PeerImpl) -> IOResult<()> {
+fn echo(args: &[&str], peer: &mut Peer) -> IOResult<()> {
     let mut iter = args.iter();
     write!(peer.stream, "OK `{}`", iter.next().unwrap())?;
     for i in iter {
@@ -57,7 +57,7 @@ fn echo(args: &[&str], peer: &mut PeerImpl) -> IOResult<()> {
     writeln!(peer.stream)
 }
 
-fn subscribe(args: &[&str], peer: &mut PeerImpl) -> IOResult<()> {
+fn subscribe(args: &[&str], peer: &mut Peer) -> IOResult<()> {
     if peer.subscribe_addr.is_some() {
         return writeln!(peer.stream, "ERR Already subscribed");
     }
@@ -74,7 +74,7 @@ fn subscribe(args: &[&str], peer: &mut PeerImpl) -> IOResult<()> {
     writeln!(peer.stream, "OK All UDP packets will be sent to {addr}")
 }
 
-fn unsubscribe(_args: &[&str], peer: &mut PeerImpl) -> IOResult<()> {
+fn unsubscribe(_args: &[&str], peer: &mut Peer) -> IOResult<()> {
     if peer.subscribe_addr.is_some() {
         peer.subscribe_addr = None;
         writeln!(peer.stream, "OK Unsubscribed")
@@ -84,7 +84,7 @@ fn unsubscribe(_args: &[&str], peer: &mut PeerImpl) -> IOResult<()> {
     }
 }
 
-fn validate_address_range(peer: &mut PeerImpl, domain: u64, address: u64, size: u64) -> IOResult<bool> {
+fn validate_address_range(peer: &mut Peer, domain: u64, address: u64, size: u64) -> IOResult<bool> {
     if !peer.address_validation_callback.call(&AddressRange { domain, address, size }) {
         writeln!(peer.stream, "ERR Address range given is not valid for this emulator")?;
         Ok(false)
@@ -94,7 +94,7 @@ fn validate_address_range(peer: &mut PeerImpl, domain: u64, address: u64, size: 
     }
 }
 
-fn write_memory(args: &[&str], peer: &mut PeerImpl) -> IOResult<()> {
+fn write_memory(args: &[&str], peer: &mut Peer) -> IOResult<()> {
     let domain = match parse_str_to_u64(args[0]) {
         Some(n) => n,
         None => return writeln!(peer.stream, "ERR Invalid domain")
@@ -149,7 +149,7 @@ fn parse_str_to_u64(what: &str) -> Option<u64> {
     Some(number)
 }
 
-fn stream_memory(args: &[&str], peer: &mut PeerImpl) -> IOResult<()> {
+fn stream_memory(args: &[&str], peer: &mut Peer) -> IOResult<()> {
     let domain = parse_str_to_u64(args[0]);
     let address = parse_str_to_u64(args[1]);
     let size = parse_str_to_u64(args[2]);
@@ -185,7 +185,7 @@ fn stream_memory(args: &[&str], peer: &mut PeerImpl) -> IOResult<()> {
     writeln!(peer.stream, "OK Now streaming at 0x{:X}", address)
 }
 
-fn list_streams(_args: &[&str], peer: &mut PeerImpl) -> IOResult<()> {
+fn list_streams(_args: &[&str], peer: &mut Peer) -> IOResult<()> {
     if peer.streams.is_empty() {
         return writeln!(peer.stream, "ERR No streams");
     }
@@ -203,7 +203,7 @@ fn list_streams(_args: &[&str], peer: &mut PeerImpl) -> IOResult<()> {
     writeln!(peer.stream)
 }
 
-fn stop_streaming(args: &[&str], peer: &mut PeerImpl) -> IOResult<()> {
+fn stop_streaming(args: &[&str], peer: &mut Peer) -> IOResult<()> {
     if peer.streams.is_empty() {
         return writeln!(peer.stream, "ERR No streams");
     }
