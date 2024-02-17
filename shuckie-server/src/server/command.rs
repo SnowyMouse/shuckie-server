@@ -18,8 +18,8 @@ pub const COMMANDS: &'static [Command] = &[
     Command { name: "HELP", function: help, arguments: (1, 1), description: "Get help for the given command.", usage: "<command>" },
     Command { name: "LIST_COMMANDS", function: list_commands, arguments: (0, 0), description: "List all commands.", usage: "" },
     Command { name: "LIST_STREAMS", function: list_streams, arguments: (0, 0), description: "List all currently streamed addresses and lengths. Fails if not streaming.", usage: "" },
-    Command { name: "STOP_STREAMING", function: stop_streaming, arguments: (0, 1), description: "Stop streaming at the requested address, or no argument to stop all streaming. Fails if not streaming that address.", usage: "[address]" },
-    Command { name: "STREAM_MEMORY", function: stream_memory, arguments: (3, 3), description: "Stream memory from the given address to the subscribed address via UDP. Fails if already streaming that address.", usage: "<address> <length>" },
+    Command { name: "START_STREAM_MEMORY", function: stream_memory, arguments: (3, 3), description: "Stream memory from the given address to the subscribed address via UDP. Fails if already streaming that address.", usage: "<address> <length>" },
+    Command { name: "STOP_STREAM_MEMORY", function: stop_streaming, arguments: (0, 1), description: "Stop streaming at the requested address, or no argument to stop all streaming. Fails if not streaming that address.", usage: "[address]" },
     Command { name: "SUBSCRIBE", function: subscribe, arguments: (1, 1), description: "Subscribe with the given UDP port (IP must match your TCP IP). Fails if already subscribed.", usage: "<port>" },
     Command { name: "UNSUBSCRIBE", function: unsubscribe, arguments: (0, 0), description: "Unsubscribe without clearing the list of streamed addresses. Must be done before re-subscribing. Fails if not subscribed.", usage: "" },
     Command { name: "WRITE_MEMORY", function: write_memory, arguments: (3, usize::MAX), description: "Writes the memory to the given address, but note that the actual write may be slightly delayed if the emulator thread is busy.", usage: "<domain> <address> <byte1> [byte2 ...]" }

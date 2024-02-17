@@ -120,7 +120,7 @@ impl Stream {
     }
 
     fn respond(&mut self, socket: &UdpSocket, to: &SocketAddr) {
-        fn send_packet(domain: u64, address: u64, data: &[u8], sequence_index: u64, socket: &UdpSocket, to: &SocketAddr) -> bool {
+        fn send_packet(domain: u64, address: u64, full_length: u64, offset: u64, data: &[u8], sequence_index: u64, socket: &UdpSocket, to: &SocketAddr) -> bool {
             let packet = [0u8; PACKET_SIZE + 100];
             let mut cursor = Cursor::new(packet);
 
@@ -129,7 +129,9 @@ impl Stream {
             cursor.write(&sequence_index.to_be_bytes()).unwrap();
             cursor.write(&domain.to_be_bytes()).unwrap();
             cursor.write(&address.to_be_bytes()).unwrap();
-            cursor.write(&(data.len() as u64).to_be_bytes()).unwrap();
+            cursor.write(&full_length.to_be_bytes()).unwrap();
+            cursor.write(&offset.to_be_bytes()).unwrap();
+            cursor.write(&(data.len() as u16).to_be_bytes()).unwrap();
             cursor.write(data).unwrap();
 
             let size = cursor.position() as usize;
@@ -148,13 +150,13 @@ impl Stream {
 
         let sequence_index = self.sequence_index.fetch_add(1, Ordering::Relaxed);
         let domain = self.domain;
-        let mut address = self.address;
-        for i in (0..self.buffer.len()).step_by(PACKET_SIZE) {
-            let range = &self.buffer[i..(i + PACKET_SIZE).min(self.buffer.len())];
-            if !send_packet(domain, address, range, sequence_index, socket, to) {
+        let address = self.address;
+        let buffer_length = self.buffer.len();
+        for offset in (0..buffer_length).step_by(PACKET_SIZE) {
+            let range = &self.buffer[offset..(offset + PACKET_SIZE).min(buffer_length)];
+            if !send_packet(domain, address, buffer_length as u64, offset as u64, range, sequence_index, socket, to) {
                 return
             }
-            address += range.len() as u64;
         }
         self.pending = false;
     }
